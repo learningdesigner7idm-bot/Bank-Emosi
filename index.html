@@ -23,7 +23,7 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         @keyframes pulse-green {
             0%   { transform: scale(1);   color: white; }
-            50%  { transform: scale(1.1); color: #4ade80; }
+            50%  { transform: scale(1.05); color: #4ade80; }
             100% { transform: scale(1);   color: white; }
         }
         .animate-pulse-green { animation: pulse-green 0.5s ease-in-out; }
@@ -78,11 +78,9 @@ const AudioEngine = {
     async init() {
         if (!this.ctx) {
             this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-            // Master bus for BGM
             this.masterGain = this.ctx.createGain();
             this.masterGain.gain.setValueAtTime(0.40, this.ctx.currentTime);
             this.masterGain.connect(this.ctx.destination);
-            // Separate bus for SFX
             this.sfxGain = this.ctx.createGain();
             this.sfxGain.gain.setValueAtTime(1.0, this.ctx.currentTime);
             this.sfxGain.connect(this.ctx.destination);
@@ -90,7 +88,6 @@ const AudioEngine = {
         if (this.ctx.state === 'suspended') await this.ctx.resume();
     },
 
-    /* Low-level note: schedule an oscillator note */
     _n(freq, t0, dur, type, vol, bus) {
         if (!this.ctx) return;
         const o = this.ctx.createOscillator();
@@ -106,7 +103,6 @@ const AudioEngine = {
         o.stop(t0 + dur + 0.02);
     },
 
-    /* SFX: click, profit, loss */
     playSFX(type) {
         if (!this.ctx) return;
         const now = this.ctx.currentTime;
@@ -123,7 +119,6 @@ const AudioEngine = {
         }
     },
 
-    /* Start the background music loop */
     startBGM() {
         if (!this.ctx || this.bgPlaying) return;
         this.bgPlaying = true;
@@ -131,15 +126,13 @@ const AudioEngine = {
         this._playBar(this.ctx.currentTime + 0.10);
     },
 
-    /* Schedule one bar then queue the next */
     _playBar(t0) {
         if (!this.bgPlaying || !this.ctx) return;
 
         const BPM = 92;
-        const b   = 60 / BPM;   // beat duration (s)
-        const bar = b * 4;      // bar duration (s)
+        const b   = 60 / BPM;
+        const bar = b * 4;
 
-        /* --- Frequency table --- */
         const H = (note, oct) => {
             const semis = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
             const [, n, acc, o] = note.match(/^([A-G])([b#]?)(\d+)$/);
@@ -157,7 +150,6 @@ const AudioEngine = {
             C5:H('C5'), D5:H('D5'), Eb5:H('Eb5'), F5:H('F5'),
         };
 
-        /* --- 4-bar progression: Cm → Ab → Eb → Bb --- */
         const prog = [
             { sub:F.C1,  bass:[F.C2, F.G2, F.C2, F.G2 ], pads:[F.C3, F.Eb3, F.G3,  F.Bb3] },
             { sub:F.Ab1, bass:[F.Ab2,F.Eb2,F.Ab2,F.C3  ], pads:[F.Ab3,F.C4,  F.Eb4, F.Ab4] },
@@ -166,30 +158,25 @@ const AudioEngine = {
         ];
         const ch = prog[this.barIndex % 4];
 
-        /* --- SUB BASS drone --- */
         this._n(ch.sub, t0, bar*0.96, 'sine', 0.22);
 
-        /* --- BASS LINE: 4 punchy beats --- */
         ch.bass.forEach((freq, i) => {
             this._n(freq, t0 + i*b, b*0.60, 'sine', 0.30);
         });
 
-        /* --- PADS: lush chord swell --- */
         ch.pads.forEach((freq, i) => {
             const swt = t0 + i*0.04;
             this._n(freq,   swt,      bar*0.88, 'triangle', 0.055);
             this._n(freq*2, swt+0.12, bar*0.70, 'triangle', 0.018);
         });
 
-        /* --- KICK: beats 1 & 3 --- */
         [0, 2].forEach(beat => {
             const t = t0 + beat*b;
             this._n(90,  t, 0.28, 'sine', 0.35);
             this._n(50,  t, 0.40, 'sine', 0.22);
-            this._n(220, t, 0.05, 'sine', 0.12); // click transient
+            this._n(220, t, 0.05, 'sine', 0.12);
         });
 
-        /* --- SNARE: beats 2 & 4 --- */
         [1, 3].forEach(beat => {
             const t = t0 + beat*b;
             [[200,0.028],[320,0.020],[460,0.016],[600,0.012]].forEach(([f,v]) =>
@@ -197,28 +184,24 @@ const AudioEngine = {
             );
         });
 
-        /* --- HI-HAT: 8th notes --- */
         for (let i = 0; i < 8; i++) {
             const t   = t0 + i*(b/2);
             const vol = (i%4===0) ? 0.050 : (i%2===0 ? 0.028 : 0.014);
             this._n(7000 + Math.random()*4000, t, 0.035, 'square', vol);
         }
-        // Open hi-hat beat 3.5
         this._n(9500 + Math.random()*1000, t0 + 3.5*b, 0.14, 'square', 0.022);
 
-        /* --- MELODY: one phrase per bar --- */
         const barMod = this.barIndex % 4;
         const melodies = [
-            [F.C4, F.Eb4, F.G4, F.Bb4, F.Ab4, F.G4, F.Eb4, F.C4],  // bar 0: Cm ascending
-            [F.Ab4,F.C5,  F.Eb5,F.C5,  F.Ab4, F.G4, F.F4,  F.Eb4],  // bar 1: Ab flourish
-            [F.Eb4,F.G4,  F.Bb4,F.G4,  F.Eb4, F.D4, F.Eb4, F.F4 ],  // bar 2: Eb resolve
-            [F.Bb4,F.F4,  F.D4, F.Bb3, F.C4,  F.D4, F.Eb4, F.F4 ],  // bar 3: Bb cadence
+            [F.C4, F.Eb4, F.G4, F.Bb4, F.Ab4, F.G4, F.Eb4, F.C4],
+            [F.Ab4,F.C5,  F.Eb5,F.C5,  F.Ab4, F.G4, F.F4,  F.Eb4],
+            [F.Eb4,F.G4,  F.Bb4,F.G4,  F.Eb4, F.D4, F.Eb4, F.F4 ],
+            [F.Bb4,F.F4,  F.D4, F.Bb3, F.C4,  F.D4, F.Eb4, F.F4 ],
         ];
         melodies[barMod].forEach((freq, i) => {
             this._n(freq, t0 + i*(b/2), b*0.42, 'triangle', 0.058);
         });
 
-        /* --- COUNTER-MELODY: every 4 bars (after intro) --- */
         if (this.barIndex > 0 && barMod === 0) {
             const cmel = [F.G4,F.F4,F.Eb4,F.D4,F.C4,F.D4,F.Eb4,F.G4];
             cmel.forEach((freq, i) => {
@@ -228,7 +211,6 @@ const AudioEngine = {
 
         this.barIndex++;
 
-        /* Queue next bar — fire slightly before current bar ends for gapless looping */
         const delay = Math.max(50, (bar - 0.20) * 1000);
         this.bgTimer = setTimeout(() => {
             if (this.bgPlaying && this.ctx) {
@@ -367,7 +349,6 @@ function App() {
         }, 400);
     };
 
-    /* ---- LOADING ---- */
     if (isLoggingIn) return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-600 text-white">
             <div className="animate-float mb-8"><Icon name="piggy-bank" size={80}/></div>
@@ -376,7 +357,6 @@ function App() {
         </div>
     );
 
-    /* ---- LOGIN ---- */
     if (!isLoggedIn) return (
         <div className="min-h-screen flex items-center justify-center p-4">
             <div className="bg-white p-8 md:p-12 rounded-[3.5rem] shadow-2xl max-w-md w-full border border-gray-100 relative overflow-hidden">
@@ -418,7 +398,6 @@ function App() {
         </div>
     );
 
-    /* ---- WELCOME ---- */
     if (!isWelcomed) return (
         <div className="min-h-screen flex items-center justify-center p-4 bg-indigo-50">
             <div className="bg-white p-10 md:p-16 rounded-[4rem] shadow-2xl max-w-2xl w-full text-center border-4 border-white ring-[12px] ring-indigo-100">
@@ -435,7 +414,6 @@ function App() {
         </div>
     );
 
-    /* ---- RESULT ---- */
     if (showResult) {
         const pos = balance >= 0;
         return (
@@ -448,7 +426,7 @@ function App() {
                     <h3 className="text-4xl font-black mb-6 text-indigo-950 uppercase leading-none">Hasil Trading</h3>
                     <div className="bg-gray-50 p-6 rounded-[2rem] border mb-8">
                         <p className="text-[10px] font-black text-gray-400 uppercase mb-1">Total Ekuitas</p>
-                        <p className={`text-4xl font-black ${pos?'text-green-500':'text-red-500'}`}>{fmtIDR(balance)}</p>
+                        <p className={`text-3xl font-black ${pos?'text-green-500':'text-red-500'}`}>{fmtIDR(balance)}</p>
                     </div>
                     <p className="text-lg font-medium mb-10 text-gray-500 leading-relaxed px-4">
                         {pos ? `Selamat ${fullName}! Analisis pasar menunjukkan hubungan kerjamu sudah baik. Tingkatkan terus saldo hubunganmu!`
@@ -466,7 +444,6 @@ function App() {
     const sc      = scenarios[idx];
     const correct = predictions[idx] === sc.type;
 
-    /* ---- GAME ---- */
     return (
         <div className="min-h-screen p-4 md:p-8">
             <div className="max-w-6xl mx-auto">
@@ -478,7 +455,6 @@ function App() {
                         <h1 className="text-xl font-black text-indigo-950 tracking-tight uppercase">BANK EMOSI</h1>
                     </div>
                     <div className="flex items-center gap-4">
-                        {/* BGM Toggle Button with animated visualizer */}
                         <button
                             onClick={toggleMute}
                             className={`flex items-center gap-2.5 px-4 py-2.5 rounded-2xl transition-all shadow-sm border font-bold text-xs uppercase tracking-wider ${isMuted?'bg-red-50 border-red-100 text-red-400':'bg-white border-indigo-100 text-indigo-600'}`}
@@ -486,7 +462,6 @@ function App() {
                         >
                             <Icon name={isMuted?'volume-x':'music'} size={15}/>
                             <span className="hidden sm:inline">{isMuted?'MUTE':'BGM ON'}</span>
-                            {/* Animated bars — shown only when NOT muted */}
                             <div className={`flex items-end gap-[3px] h-4 ${isMuted?'viz-paused':''}`}>
                                 <div className="vbar" style={{height:'5px'}}/>
                                 <div className="vbar" style={{height:'12px'}}/>
@@ -552,7 +527,7 @@ function App() {
                                                 </div>
                                             </div>
                                             <div className="flex-grow overflow-y-auto pr-3 mb-8 custom-scrollbar text-center">
-                                                <h3 className={`text-5xl font-black mb-4 ${correct?'text-green-500':'text-red-500'}`}>{correct?'+10.000':'-10.000'}</h3>
+                                                <h3 className={`text-4xl font-black mb-4 ${correct?'text-green-500':'text-red-500'}`}>{correct?'+10.000':'-10.000'}</h3>
                                                 <div className={`bg-gray-50 p-6 rounded-[2.5rem] text-indigo-900 leading-relaxed font-semibold italic border-l-8 border-indigo-200 text-left ${dynFont(sc.back)}`}>
                                                     "{sc.back}"
                                                 </div>
@@ -566,7 +541,6 @@ function App() {
                             </div>
                         </div>
 
-                        {/* Progress dots */}
                         <div className="flex justify-center gap-3">
                             {scenarios.map((_,i)=>(
                                 <div key={i} className={`h-2.5 rounded-full transition-all duration-500 ${i===idx?'bg-indigo-600 w-12':predictions[i]!==null?'bg-indigo-200 w-4':'bg-white w-4'}`}/>
@@ -578,17 +552,17 @@ function App() {
                     <div className="flex flex-col gap-8">
                         <div className="bg-indigo-700 rounded-[3rem] p-10 text-white shadow-2xl">
                             <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200/60 mb-2">Saldo Emosi Hubungan</p>
-                            <h2 className={`text-6xl font-black leading-none ${balanceAnim?'animate-pulse-green':''}`}>
-                                <span className="text-2xl font-bold opacity-50 mr-2">Rp</span>{balance.toLocaleString('id-ID')}
+                            <h2 className={`text-4xl font-black leading-none ${balanceAnim?'animate-pulse-green':''}`}>
+                                <span className="text-lg font-bold opacity-50 mr-2">Rp</span>{balance.toLocaleString('id-ID')}
                             </h2>
                             <div className="grid grid-cols-2 gap-4 mt-8">
                                 <div className="bg-white/5 p-4 rounded-3xl border border-white/5">
                                     <p className="text-[9px] font-black uppercase opacity-40 mb-1">Emosi Profits</p>
-                                    <p className="text-xl font-black text-green-400">+{fmtIDR(history.filter(h=>h.isCorrect).length*10000)}</p>
+                                    <p className="text-base font-black text-green-400">+{fmtIDR(history.filter(h=>h.isCorrect).length*10000)}</p>
                                 </div>
                                 <div className="bg-white/5 p-4 rounded-3xl border border-white/5">
                                     <p className="text-[9px] font-black uppercase opacity-40 mb-1">Emosi Losses</p>
-                                    <p className="text-xl font-black text-red-400">-{fmtIDR(history.filter(h=>!h.isCorrect).length*10000)}</p>
+                                    <p className="text-base font-black text-red-400">-{fmtIDR(history.filter(h=>!h.isCorrect).length*10000)}</p>
                                 </div>
                             </div>
                         </div>
